@@ -40,7 +40,6 @@ import { Route as AdminPricingRouteImport } from './routes/admin.pricing'
 import { Route as AdminPlatformsRouteImport } from './routes/admin.platforms'
 import { Route as AdminMigrationRouteImport } from './routes/admin.migration'
 import { Route as AdminCouriersRouteImport } from './routes/admin.couriers'
-import { Route as AdminBundlesRouteImport } from './routes/admin.bundles'
 import { Route as OrdersOrderIdEditRouteImport } from './routes/orders.$orderId.edit'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as AdminMigrationReconciliationRouteImport } from './routes/admin.migration.reconciliation'
@@ -202,11 +201,6 @@ const AdminCouriersRoute = AdminCouriersRouteImport.update({
   path: '/couriers',
   getParentRoute: () => AdminRoute,
 } as any)
-const AdminBundlesRoute = AdminBundlesRouteImport.update({
-  id: '/bundles',
-  path: '/bundles',
-  getParentRoute: () => AdminRoute,
-} as any)
 const OrdersOrderIdEditRoute = OrdersOrderIdEditRouteImport.update({
   id: '/edit',
   path: '/edit',
@@ -247,7 +241,6 @@ export interface FileRoutesByFullPath {
   '/stock': typeof StockRouteWithChildren
   '/unauthorized': typeof UnauthorizedRoute
   '/warehouse': typeof WarehouseRouteWithChildren
-  '/admin/bundles': typeof AdminBundlesRoute
   '/admin/couriers': typeof AdminCouriersRoute
   '/admin/migration': typeof AdminMigrationRouteWithChildren
   '/admin/platforms': typeof AdminPlatformsRoute
@@ -286,7 +279,6 @@ export interface FileRoutesByTo {
   '/stock': typeof StockRouteWithChildren
   '/unauthorized': typeof UnauthorizedRoute
   '/warehouse': typeof WarehouseRouteWithChildren
-  '/admin/bundles': typeof AdminBundlesRoute
   '/admin/couriers': typeof AdminCouriersRoute
   '/admin/migration': typeof AdminMigrationRouteWithChildren
   '/admin/platforms': typeof AdminPlatformsRoute
@@ -326,7 +318,6 @@ export interface FileRoutesById {
   '/stock': typeof StockRouteWithChildren
   '/unauthorized': typeof UnauthorizedRoute
   '/warehouse': typeof WarehouseRouteWithChildren
-  '/admin/bundles': typeof AdminBundlesRoute
   '/admin/couriers': typeof AdminCouriersRoute
   '/admin/migration': typeof AdminMigrationRouteWithChildren
   '/admin/platforms': typeof AdminPlatformsRoute
@@ -367,7 +358,6 @@ export interface FileRouteTypes {
     | '/stock'
     | '/unauthorized'
     | '/warehouse'
-    | '/admin/bundles'
     | '/admin/couriers'
     | '/admin/migration'
     | '/admin/platforms'
@@ -406,7 +396,6 @@ export interface FileRouteTypes {
     | '/stock'
     | '/unauthorized'
     | '/warehouse'
-    | '/admin/bundles'
     | '/admin/couriers'
     | '/admin/migration'
     | '/admin/platforms'
@@ -445,7 +434,6 @@ export interface FileRouteTypes {
     | '/stock'
     | '/unauthorized'
     | '/warehouse'
-    | '/admin/bundles'
     | '/admin/couriers'
     | '/admin/migration'
     | '/admin/platforms'
@@ -708,13 +696,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminCouriersRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/admin/bundles': {
-      id: '/admin/bundles'
-      path: '/bundles'
-      fullPath: '/admin/bundles'
-      preLoaderRoute: typeof AdminBundlesRouteImport
-      parentRoute: typeof AdminRoute
-    }
     '/orders/$orderId/edit': {
       id: '/orders/$orderId/edit'
       path: '/edit'
@@ -768,7 +749,6 @@ const AdminMigrationRouteWithChildren = AdminMigrationRoute._addFileChildren(
 )
 
 interface AdminRouteChildren {
-  AdminBundlesRoute: typeof AdminBundlesRoute
   AdminCouriersRoute: typeof AdminCouriersRoute
   AdminMigrationRoute: typeof AdminMigrationRouteWithChildren
   AdminPlatformsRoute: typeof AdminPlatformsRoute
@@ -783,7 +763,6 @@ interface AdminRouteChildren {
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
-  AdminBundlesRoute: AdminBundlesRoute,
   AdminCouriersRoute: AdminCouriersRoute,
   AdminMigrationRoute: AdminMigrationRouteWithChildren,
   AdminPlatformsRoute: AdminPlatformsRoute,

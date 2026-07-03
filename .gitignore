@@ -14,3 +14,7 @@ todos.json
 
 # Local Netlify folder
 .netlify
+
+data-example/
+data-example-2/
+ui-img/

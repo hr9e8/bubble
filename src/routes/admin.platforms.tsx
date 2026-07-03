@@ -20,8 +20,27 @@ function AdminPlatformsPage() {
   const deletePlatform = useServerFn(deleteAdminSalesPlatform)
   const [editing, setEditing] = useState<Record<string, unknown> | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
+  const [search, setSearch] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const normalizedSearch = search.trim().toLowerCase()
+  const filteredRows = normalizedSearch
+    ? rows.filter((row) => {
+        const haystack = [
+          row.name,
+          row.order_prefix,
+          row.platform_category,
+          row.url,
+          row.finance_approval_active ? 'enabled' : 'disabled',
+          row.order_min_limit_approval,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+
+        return haystack.includes(normalizedSearch)
+      })
+    : rows
   const values = {
     id: editing?.id,
     name: editing?.name ?? '',
@@ -43,7 +62,7 @@ function AdminPlatformsPage() {
         setEditorOpen(true)
       }}
       metrics={[]}
-      rows={rows}
+      rows={filteredRows}
       columns={[
         {
           header: 'Platform',
@@ -61,22 +80,25 @@ function AdminPlatformsPage() {
       ]}
       getRowKey={(row) => row.id}
       searchPlaceholder="Search platforms, prefixes, URLs"
+      searchValue={search}
+      onSearchChange={setSearch}
+      showFilter={false}
       emptyMessage="No sales platforms found."
       rowActions={(row) => (
-        <div className="flex flex-wrap gap-2">
+        <div className="admin-row-actions">
           <button
-            className="polaris-button polaris-button-secondary"
+            className="admin-row-action admin-row-action-secondary"
             type="button"
             onClick={() => {
               setEditing(row)
               setEditorOpen(true)
             }}
           >
-            <Pencil className="h-4 w-4" />
+            <Pencil className="h-5 w-5" />
             Edit
           </button>
           <button
-            className="polaris-button polaris-button-critical"
+            className="admin-row-action admin-row-action-critical"
             type="button"
             onClick={async () => {
               if (!window.confirm(`Delete ${row.name}?`)) return
@@ -92,7 +114,7 @@ function AdminPlatformsPage() {
               }
             }}
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 className="h-5 w-5" />
             Delete
           </button>
         </div>

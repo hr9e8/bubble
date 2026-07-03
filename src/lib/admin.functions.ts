@@ -1,7 +1,9 @@
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { Database } from './db/types'
 import { countValue } from './server/db-helpers'
+import { formatInternationalPhone } from './utils'
 
 type AdminCountTable = Extract<
   keyof Database,
@@ -13,7 +15,6 @@ type AdminCountTable = Extract<
   | 'permissions'
   | 'role_permissions'
   | 'user_permissions'
-  | 'bundle_line_items'
   | 'product_credit_rates'
   | 'product_credits'
   | 'shipping_countries'
@@ -43,15 +44,34 @@ const optionalInt = z.coerce.number().int().optional().nullable().transform((val
 const uuid = z.string().uuid()
 const optionalUuid = z.string().trim().optional().transform((value) => value || null).pipe(z.string().uuid().nullable())
 
+function splitRelationList(value: string | null | undefined) {
+  return value
+    ? value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : []
+}
+
+function uniqueValues(values: Array<string>) {
+  return Array.from(new Set(values.filter(Boolean)))
+}
+
 const productInput = z.object({
   id: uuid.optional(),
   name: z.string().trim().min(1),
   skuCode: optionalString,
+  manufacturerBarcode: optionalString,
   categoryId: optionalUuid,
+  description: optionalString,
   productType: optionalString,
+  shortform: optionalString,
   supplierName: optionalString,
   priceRetail: z.coerce.number().finite().default(0),
   priceDistributor: z.coerce.number().finite().default(0),
+  weightG: optionalInt,
+  lengthCm: optionalNumber,
+  heightCm: optionalNumber,
   reorderLevel: optionalInt,
   statusReady: z.coerce.boolean().default(true),
   creditRequired: z.coerce.boolean().default(false),
@@ -70,6 +90,12 @@ const userInput = z.object({
   distributorLevel: optionalString,
   platformId: optionalUuid,
   salesTeamLocation: optionalString,
+  warehouseNames: z.array(z.string().trim().min(1)).default([]),
+  profileImage: z.object({
+    filename: z.string().trim().min(1),
+    contentType: z.string().regex(/^image\//),
+    base64: z.string().min(1),
+  }).optional(),
 })
 
 const roleInput = z.object({
@@ -222,20 +248,25 @@ export const listAdminUsers = createServerFn({ method: 'GET' }).handler(async ()
   const { getDatabase } = await import('./db/client')
   await requireAdmin()
 
-  const [rows, total, roles, overrides, leaderLinks, roleOptions, platformOptions] = await Promise.all([
+  const [rows, total, roles, overrides, leaderLinks, roleOptions, platformOptions, warehouseOptions] = await Promise.all([
     getDatabase()
       .selectFrom('app_users')
       .leftJoin('sales_team_platforms', 'sales_team_platforms.id', 'app_users.platform_id')
+      .leftJoin('files as profile_images', 'profile_images.id', 'app_users.profile_image_file_id')
       .select([
         'app_users.id',
         'app_users.name',
         'app_users.email',
         'app_users.phone',
         'app_users.user_role',
+        'app_users.platform_sales_team',
         'app_users.distributor_level',
         'app_users.sales_team_location',
+        'app_users.warehouse_relation_raw',
         'app_users.platform_id',
+        'app_users.profile_image_file_id',
         'sales_team_platforms.name as platform_name',
+        'profile_images.public_url as profile_image_url',
       ])
       .orderBy('app_users.name')
       .limit(50)
@@ -250,12 +281,47 @@ export const listAdminUsers = createServerFn({ method: 'GET' }).handler(async ()
       .executeTakeFirst(),
     getDatabase().selectFrom('roles').select(['id', 'name']).orderBy('name').execute(),
     getDatabase().selectFrom('sales_team_platforms').select(['id', 'name']).orderBy('name').execute(),
+    getDatabase().selectFrom('warehouse_platforms').select(['id', 'name']).orderBy('name').execute(),
   ])
+  const userNames = rows.map((row) => row.name).filter(Boolean)
+  const relationTokens = uniqueValues(rows.flatMap((row) => splitRelationList(row.warehouse_relation_raw)))
+  const warehouseRelations = userNames.length > 0
+    ? await getDatabase()
+        .selectFrom('warehouse_user_relations')
+        .select(['user_name', 'warehouse_name', 'legacy_slug'])
+        .where((eb) => {
+          const conditions = [eb('user_name', 'in', userNames)]
+          if (relationTokens.length > 0) conditions.push(eb('legacy_slug', 'in', relationTokens))
+          return eb.or(conditions)
+        })
+        .orderBy('warehouse_name')
+        .execute()
+    : []
+  const warehousesByUserName = warehouseRelations.reduce<Record<string, Array<string>>>((acc, relation) => {
+    if (!relation.user_name) return acc
+    acc[relation.user_name] = [...(acc[relation.user_name] ?? []), relation.warehouse_name]
+    return acc
+  }, {})
+  const warehousesByRelationToken = warehouseRelations.reduce<Record<string, string>>((acc, relation) => {
+    if (relation.legacy_slug) acc[relation.legacy_slug] = relation.warehouse_name
+    return acc
+  }, {})
+  const warehouseOptionNames = new Set(warehouseOptions.map((warehouse) => warehouse.name))
 
   return {
-    rows,
+    rows: rows.map((row) => ({
+      ...row,
+      phone: formatInternationalPhone(row.phone) || null,
+      warehouse_names: uniqueValues(
+        warehousesByUserName[row.name]
+          ?? splitRelationList(row.warehouse_relation_raw)
+            .map((token) => warehousesByRelationToken[token] ?? token)
+            .filter((name) => warehouseOptionNames.has(name)),
+      ),
+    })),
     roleOptions,
     platformOptions,
+    warehouseOptions,
     stats: {
       users: total,
       roles,
@@ -317,15 +383,22 @@ export const listAdminProducts = createServerFn({ method: 'GET' }).handler(async
     getDatabase()
       .selectFrom('products')
       .leftJoin('product_categories', 'product_categories.id', 'products.category_id')
+      .leftJoin('files as product_images', 'product_images.id', 'products.image_file_id')
       .select([
         'products.id',
         'products.name',
+        'products.description',
         'products.sku_code',
+        'products.manufacturer_barcode',
         'products.category_id',
         'products.product_type',
+        'products.shortform',
         'products.supplier_name',
         'products.price_retail',
         'products.price_distributor',
+        'products.weight_g',
+        'products.length_cm',
+        'products.height_cm',
         'products.reorder_level',
         'products.status_ready',
         'products.credit_required',
@@ -333,10 +406,11 @@ export const listAdminProducts = createServerFn({ method: 'GET' }).handler(async
         'products.custom_bundle_price',
         'products.hide_retail',
         'products.hide_distributor',
+        'products.created_at',
         'product_categories.name as category_name',
+        'product_images.public_url as image_url',
       ])
       .orderBy('products.updated_at', 'desc')
-      .limit(50)
       .execute(),
     countTable('products'),
     getDatabase().selectFrom('product_categories').select((eb) => eb.fn.countAll().as('count')).executeTakeFirst(),
@@ -354,49 +428,6 @@ export const listAdminProducts = createServerFn({ method: 'GET' }).handler(async
       hiddenRetail: countValue(hiddenRetail?.count),
     },
     categoryOptions,
-  }
-})
-
-export const listAdminBundles = createServerFn({ method: 'GET' }).handler(async () => {
-  const { getDatabase } = await import('./db/client')
-  await requireAdmin()
-
-  const [rows, lineItems, linkedParents, linkedChildren, productOptions] = await Promise.all([
-    getDatabase()
-      .selectFrom('bundle_line_items')
-      .leftJoin('products as bundle_products', 'bundle_products.id', 'bundle_line_items.bundle_product_id')
-      .leftJoin('products as child_products', 'child_products.id', 'bundle_line_items.child_product_id')
-      .select([
-        'bundle_line_items.id',
-        'bundle_line_items.bundle_product_code',
-        'bundle_line_items.product_code',
-        'bundle_line_items.bundle_product_id',
-        'bundle_line_items.child_product_id',
-        'bundle_line_items.product_category',
-        'bundle_line_items.quantity',
-        'bundle_line_items.price_retail',
-        'bundle_line_items.price_distributor',
-        'bundle_products.name as bundle_product_name',
-        'child_products.name as child_product_name',
-      ])
-      .orderBy('bundle_line_items.updated_at', 'desc')
-      .limit(50)
-      .execute(),
-    countTable('bundle_line_items'),
-    getDatabase().selectFrom('bundle_line_items').select((eb) => eb.fn.countAll().as('count')).where('bundle_product_id', 'is not', null).executeTakeFirst(),
-    getDatabase().selectFrom('bundle_line_items').select((eb) => eb.fn.countAll().as('count')).where('child_product_id', 'is not', null).executeTakeFirst(),
-    getDatabase().selectFrom('products').select(['id', 'name', 'sku_code']).orderBy('name').limit(400).execute(),
-  ])
-
-  return {
-    rows,
-    stats: {
-      lineItems,
-      linkedParents: countValue(linkedParents?.count),
-      linkedChildren: countValue(linkedChildren?.count),
-      fallbackCodes: rows.filter((row) => !row.bundle_product_name || !row.child_product_name).length,
-    },
-    productOptions,
   }
 })
 
@@ -443,7 +474,7 @@ export const listAdminShipping = createServerFn({ method: 'GET' }).handler(async
   const { getDatabase } = await import('./db/client')
   await requireAdmin()
 
-  const [rows, zones, countries, states, rates, codRates] = await Promise.all([
+  const [rows, shippingRates, shippingCodRates, zones, countries, states, rates, codRates] = await Promise.all([
     getDatabase()
       .selectFrom('shipping_zones')
       .select([
@@ -460,6 +491,68 @@ export const listAdminShipping = createServerFn({ method: 'GET' }).handler(async
       .orderBy('zone_name')
       .limit(50)
       .execute(),
+    getDatabase()
+      .selectFrom('shipping_rates')
+      .leftJoin('shipping_zones', 'shipping_zones.legacy_bubble_id', 'shipping_rates.shipping_zone_legacy_id')
+      .select([
+        'shipping_rates.id',
+        'shipping_rates.name',
+        'shipping_rates.shipping_price as price',
+        'shipping_rates.shipping_type',
+        'shipping_rates.total_range',
+        'shipping_rates.weight_range_kg as weight_range',
+        'shipping_rates.weight_min_kg',
+        'shipping_rates.weight_max_kg',
+        'shipping_rates.total_min',
+        'shipping_rates.total_max',
+        'shipping_rates.shipping_zone_legacy_id',
+        'shipping_zones.id as zone_id',
+        'shipping_zones.zone_name as zone_name',
+        'shipping_zones.active as zone_active',
+        'shipping_zones.apply_all_product as zone_apply_all_product',
+        'shipping_zones.country_legacy_id as zone_country_legacy_id',
+        'shipping_zones.apply_products_raw as zone_apply_products_raw',
+        'shipping_zones.states_raw as zone_states_raw',
+        'shipping_zones.shipping_rate_raw as zone_shipping_rate_raw',
+        'shipping_zones.shipping_cod_rate_raw as zone_shipping_cod_rate_raw',
+      ])
+      .orderBy('shipping_zones.zone_name')
+      .orderBy('shipping_rates.weight_min_kg')
+      .orderBy('shipping_rates.total_min')
+      .orderBy('shipping_rates.name')
+      .limit(100)
+      .execute(),
+    getDatabase()
+      .selectFrom('shipping_cod_rates')
+      .leftJoin('shipping_zones', 'shipping_zones.legacy_bubble_id', 'shipping_cod_rates.shipping_zone_legacy_id')
+      .select([
+        'shipping_cod_rates.id',
+        'shipping_cod_rates.name',
+        'shipping_cod_rates.cod_price as price',
+        'shipping_cod_rates.shipping_type',
+        'shipping_cod_rates.total_range',
+        'shipping_cod_rates.weight_range',
+        'shipping_cod_rates.weight_min_kg',
+        'shipping_cod_rates.weight_max_kg',
+        'shipping_cod_rates.total_min',
+        'shipping_cod_rates.total_max',
+        'shipping_cod_rates.shipping_zone_legacy_id',
+        'shipping_zones.id as zone_id',
+        'shipping_zones.zone_name as zone_name',
+        'shipping_zones.active as zone_active',
+        'shipping_zones.apply_all_product as zone_apply_all_product',
+        'shipping_zones.country_legacy_id as zone_country_legacy_id',
+        'shipping_zones.apply_products_raw as zone_apply_products_raw',
+        'shipping_zones.states_raw as zone_states_raw',
+        'shipping_zones.shipping_rate_raw as zone_shipping_rate_raw',
+        'shipping_zones.shipping_cod_rate_raw as zone_shipping_cod_rate_raw',
+      ])
+      .orderBy('shipping_zones.zone_name')
+      .orderBy('shipping_cod_rates.weight_min_kg')
+      .orderBy('shipping_cod_rates.total_min')
+      .orderBy('shipping_cod_rates.name')
+      .limit(100)
+      .execute(),
     countTable('shipping_zones'),
     countTable('shipping_countries'),
     countTable('shipping_states'),
@@ -467,7 +560,22 @@ export const listAdminShipping = createServerFn({ method: 'GET' }).handler(async
     countTable('shipping_cod_rates'),
   ])
 
-  return { rows, stats: { zones, countries, states, rates, codRates } }
+  return {
+    rows,
+    rateRows: [
+      ...shippingRates.map((rate) => ({ ...rate, kind: 'shipping' as const })),
+      ...shippingCodRates.map((rate) => ({ ...rate, kind: 'cod' as const })),
+    ].sort((first, second) => {
+      const firstZone = first.zone_name ?? ''
+      const secondZone = second.zone_name ?? ''
+      if (firstZone !== secondZone) return firstZone.localeCompare(secondZone)
+      const firstWeight = Number(first.weight_min_kg ?? Number.MAX_SAFE_INTEGER)
+      const secondWeight = Number(second.weight_min_kg ?? Number.MAX_SAFE_INTEGER)
+      if (firstWeight !== secondWeight) return firstWeight - secondWeight
+      return String(first.name).localeCompare(String(second.name))
+    }),
+    stats: { zones, countries, states, rates, codRates },
+  }
 })
 
 export const listAdminCouriers = createServerFn({ method: 'GET' }).handler(async () => {
@@ -591,11 +699,17 @@ export const saveAdminProduct = createServerFn({ method: 'POST' })
     const values = {
       name: data.name,
       sku_code: data.skuCode,
+      manufacturer_barcode: data.manufacturerBarcode,
       category_id: data.categoryId,
+      description: data.description,
       product_type: data.productType,
+      shortform: data.shortform,
       supplier_name: data.supplierName,
       price_retail: data.priceRetail,
       price_distributor: data.priceDistributor,
+      weight_g: data.weightG,
+      length_cm: data.lengthCm,
+      height_cm: data.heightCm,
       reorder_level: data.reorderLevel,
       status_ready: data.statusReady,
       credit_required: data.creditRequired,
@@ -632,16 +746,52 @@ export const saveAdminUser = createServerFn({ method: 'POST' })
   .validator(userInput)
   .handler(async ({ data }) => {
     const { getDatabase } = await getAdminDeps()
-    await requireAdmin()
+    const user = await requireAdmin()
     const now = new Date()
+    const platformName = data.platformId
+      ? (await getDatabase().selectFrom('sales_team_platforms').select('name').where('id', '=', data.platformId).executeTakeFirst())?.name ?? null
+      : null
+    const bunny = data.profileImage ? await import('./storage/bunny') : null
+    const bunnyConfig = bunny ? bunny.getBunnyConfig() : null
+    let profileImageFileId: string | null | undefined
+
+    if (data.profileImage && bunny && bunnyConfig) {
+      const safeFilename = data.profileImage.filename.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const path = `profile-images/${data.id ?? 'new'}/${Date.now()}-${randomUUID()}-${safeFilename}`
+      const upload = await bunny.uploadToBunny({
+        path,
+        body: Buffer.from(data.profileImage.base64, 'base64'),
+        contentType: data.profileImage.contentType,
+      }, bunnyConfig)
+
+      const file = await getDatabase()
+        .insertInto('files')
+        .values({
+          storage_provider: 'bunny',
+          storage_zone: bunnyConfig.storageZone,
+          path: upload.path,
+          public_url: upload.publicUrl,
+          mime_type: data.profileImage.contentType,
+          size_bytes: Buffer.byteLength(data.profileImage.base64, 'base64'),
+          original_filename: data.profileImage.filename,
+          uploaded_by_user_id: user.id,
+        })
+        .returning(['id'])
+        .executeTakeFirstOrThrow()
+
+      profileImageFileId = file.id
+    }
     const values = {
       name: data.name,
       email: data.email,
-      phone: data.phone,
+      phone: formatInternationalPhone(data.phone) || null,
       user_role: data.userRole,
       distributor_level: data.distributorLevel,
       platform_id: data.platformId,
+      platform_sales_team: platformName,
       sales_team_location: data.salesTeamLocation,
+      warehouse_relation_raw: data.warehouseNames.join(' , ') || null,
+      ...(profileImageFileId ? { profile_image_file_id: profileImageFileId } : {}),
       updated_at: now,
     }
     const before = data.id
@@ -650,6 +800,23 @@ export const saveAdminUser = createServerFn({ method: 'POST' })
     const row = data.id
       ? await getDatabase().updateTable('app_users').set(values).where('id', '=', data.id).returning(['id']).executeTakeFirstOrThrow()
       : await getDatabase().insertInto('app_users').values({ ...values, created_at: now }).returning(['id']).executeTakeFirstOrThrow()
+    const previousRelationName = before?.name ?? data.name
+    await getDatabase()
+      .deleteFrom('warehouse_user_relations')
+      .where((eb) => eb.or([eb('user_name', '=', previousRelationName), eb('user_name', '=', data.name)]))
+      .execute()
+    if (data.warehouseNames.length > 0) {
+      await getDatabase()
+        .insertInto('warehouse_user_relations')
+        .values(data.warehouseNames.map((warehouseName, index) => ({
+          user_name: data.name,
+          warehouse_name: warehouseName,
+          is_default: index === 0,
+          created_at: now,
+          updated_at: now,
+        })))
+        .execute()
+    }
 
     await auditAdminChange({ action: data.id ? 'admin.user.update' : 'admin.user.create', table: 'app_users', id: row.id, before, after: data })
     return row
@@ -727,17 +894,6 @@ export const saveAdminBundleLineItem = createServerFn({ method: 'POST' })
 
     await auditAdminChange({ action: data.id ? 'admin.bundle.update' : 'admin.bundle.create', table: 'bundle_line_items', id: row.id, before, after: data })
     return row
-  })
-
-export const deleteAdminBundleLineItem = createServerFn({ method: 'POST' })
-  .validator(deleteInput)
-  .handler(async ({ data }) => {
-    const { getDatabase } = await getAdminDeps()
-    await requireAdmin()
-    const before = await getDatabase().selectFrom('bundle_line_items').selectAll().where('id', '=', data.id).executeTakeFirst()
-    await getDatabase().deleteFrom('bundle_line_items').where('id', '=', data.id).execute()
-    await auditAdminChange({ action: 'admin.bundle.delete', table: 'bundle_line_items', id: data.id, before })
-    return { id: data.id }
   })
 
 export const saveAdminCreditRate = createServerFn({ method: 'POST' })

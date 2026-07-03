@@ -16,12 +16,14 @@
     "data:import": "tsx scripts/import-csv.ts",
     "data:import:dry": "tsx scripts/import-csv.ts --dry-run",
     "data:transform": "tsx scripts/transform-import.ts",
+    "mcp:sales": "tsx src/mcp/sales-server.ts",
     "woocommerce:sync": "tsx scripts/woocommerce-sync.ts",
     "auth:generate": "auth generate --config src/lib/auth.ts",
     "auth:migrate": "auth migrate --config src/lib/auth.ts",
     "test": "vitest run"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-router": "latest",

@@ -17,6 +17,8 @@ describe('format helpers', () => {
 
   it('formats customer phone numbers with supported country prefixes', () => {
     expect(formatInternationalPhone('012-345 6789')).toBe('+60123456789')
+    expect(formatInternationalPhone('6012 345 6789')).toBe('+60123456789')
+    expect(formatInternationalPhone('+60 12-345 6789')).toBe('+60123456789')
     expect(formatInternationalPhone('61412345678')).toBe('+61412345678')
     expect(formatInternationalPhone('9123 4567', 'Singapore')).toBe('+6591234567')
     expect(formatInternationalPhone('7123456', 'Brunei')).toBe('+6737123456')

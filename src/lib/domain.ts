@@ -4,10 +4,17 @@ import {
   ClipboardCheck,
   ContactRound,
   LayoutDashboard,
+  Package,
   PackageCheck,
+  Plug,
+  ReceiptText,
   Settings,
+  Settings2,
   ShoppingCart,
+  ShieldCheck,
   Truck,
+  Upload,
+  Users,
   Warehouse,
   type LucideIcon,
 } from 'lucide-react'
@@ -45,11 +52,91 @@ export type NavigationItem = {
   href: string
   label: string
   icon: LucideIcon
+  children?: Array<NavigationChildItem>
+}
+
+export type NavigationChildItem = {
+  href: string
+  label: string
+  detail: string
+  icon: LucideIcon
 }
 
 export const navigationItems: Array<NavigationItem> = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/admin', label: 'Admin', icon: Settings },
+  {
+    href: '/admin',
+    label: 'Admin',
+    icon: Settings,
+    children: [
+      {
+        label: 'Products',
+        detail: 'Product parity fields, categories, images, supplier data, visibility, and reorder levels.',
+        href: '/admin/products',
+        icon: Package,
+      },
+      {
+        label: 'Pricing',
+        detail: 'Retail, distributor, bundle, price-list, and product-credit controls.',
+        href: '/admin/pricing',
+        icon: ReceiptText,
+      },
+      {
+        label: 'Shipping',
+        detail: 'Countries, states, zones, COD rates, couriers, and shipping matrices.',
+        href: '/admin/shipping',
+        icon: Truck,
+      },
+      {
+        label: 'Users',
+        detail: 'App profiles, role assignment, platform links, sales leaders, and warehouse relations.',
+        href: '/admin/users',
+        icon: Users,
+      },
+      {
+        label: 'Roles and permissions',
+        detail: 'Define role permission grants and audit-sensitive administrative access.',
+        href: '/admin/roles',
+        icon: ShieldCheck,
+      },
+      {
+        label: 'Couriers',
+        detail: 'Courier directory, account IDs, tracking URLs, and AWB references.',
+        href: '/admin/couriers',
+        icon: Truck,
+      },
+      {
+        label: 'Platforms',
+        detail: 'Sales platforms, warehouse platforms, website owners, and order prefixes.',
+        href: '/admin/platforms',
+        icon: Settings2,
+      },
+      {
+        label: 'Stock setup',
+        detail: 'Lots, balances, warehouses, movement ledger, and controlled assignment.',
+        href: '/admin/stocks',
+        icon: Boxes,
+      },
+      {
+        label: 'Warehouses',
+        detail: 'Warehouse platforms, user relations, stock locations, and fulfillment ownership.',
+        href: '/admin/warehouses',
+        icon: Truck,
+      },
+      {
+        label: 'WooCommerce',
+        detail: 'Connect stores, test reachability, queue imports, and receive webhooks.',
+        href: '/admin/woocommerce',
+        icon: Plug,
+      },
+      {
+        label: 'Migration',
+        detail: 'Run Bubble CSV profiling, raw staging, transforms, and reconciliation checks.',
+        href: '/admin/migration',
+        icon: Upload,
+      },
+    ],
+  },
   { href: '/orders', label: 'Order', icon: ShoppingCart },
   { href: '/customers', label: 'Customers', icon: ContactRound },
   { href: '/stock', label: 'Stock', icon: Boxes },

@@ -14,13 +14,19 @@ export function AppShell({
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const showNavigation = Boolean(currentUser)
+  const [openNavMenu, setOpenNavMenu] = useState<string | null>(null)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const navMenuRef = useRef<HTMLDivElement>(null)
   const userMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!userMenuOpen) return
+    if (!userMenuOpen && !openNavMenu) return
 
     function handlePointerDown(event: PointerEvent) {
+      if (openNavMenu && !navMenuRef.current?.contains(event.target as Node)) {
+        setOpenNavMenu(null)
+      }
+
       if (!userMenuRef.current?.contains(event.target as Node)) {
         setUserMenuOpen(false)
       }
@@ -28,6 +34,7 @@ export function AppShell({
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
+        setOpenNavMenu(null)
         setUserMenuOpen(false)
       }
     }
@@ -39,7 +46,12 @@ export function AppShell({
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [userMenuOpen])
+  }, [openNavMenu, userMenuOpen])
+
+  useEffect(() => {
+    setOpenNavMenu(null)
+    setUserMenuOpen(false)
+  }, [pathname])
 
   return (
     <div className="app-surface min-h-screen">
@@ -50,10 +62,60 @@ export function AppShell({
           </Link>
 
           {showNavigation ? (
-            <nav className="order-last -mx-4 flex w-[calc(100%+2rem)] min-w-0 items-center justify-start gap-1 overflow-x-auto border-t border-[#ebebeb] px-4 pt-2 sm:order-none sm:mx-0 sm:w-auto sm:flex-1 sm:justify-center sm:border-t-0 sm:px-2 sm:pt-0">
+            <nav className="order-last -mx-4 flex w-[calc(100%+2rem)] min-w-0 items-center justify-start gap-1 overflow-x-auto border-t border-[#ebebeb] px-4 pt-2 sm:order-none sm:mx-0 sm:w-auto sm:flex-1 sm:justify-center sm:overflow-visible sm:border-t-0 sm:px-2 sm:pt-0">
               {navigationItems.map((item) => {
                 const Icon = item.icon
                 const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
+                const hasChildren = Boolean(item.children?.length)
+
+                if (hasChildren) {
+                  const menuOpen = openNavMenu === item.href
+
+                  return (
+                    <div key={item.href} ref={navMenuRef} className="relative shrink-0">
+                      <button
+                        type="button"
+                        className={cn(
+                          'app-nav-link',
+                          active && 'app-nav-link-active',
+                        )}
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpen}
+                        onClick={() => setOpenNavMenu((open) => open === item.href ? null : item.href)}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {item.label}
+                        <ChevronDown
+                          className={cn(
+                            'h-4 w-4 text-[#616161] transition-transform',
+                            menuOpen && 'rotate-180',
+                          )}
+                          aria-hidden="true"
+                        />
+                      </button>
+
+                      {menuOpen ? (
+                        <div className="popover-surface fixed inset-x-4 top-[7.25rem] z-40 max-h-[calc(100vh-8rem)] overflow-y-auto p-2 sm:absolute sm:inset-x-auto sm:left-0 sm:top-[calc(100%+0.5rem)] sm:max-h-[min(32rem,calc(100vh-5rem))] sm:w-72" role="menu">
+                          <Link to={item.href} className="popover-action" role="menuitem" onClick={() => setOpenNavMenu(null)}>
+                            <Icon className="h-4 w-4 text-[#616161]" />
+                            Admin overview
+                          </Link>
+                          <div className="my-2 border-t border-[#ebebeb]" />
+                          {item.children?.map((child) => {
+                            const ChildIcon = child.icon
+
+                            return (
+                              <Link key={child.href} to={child.href} className="popover-action" role="menuitem" onClick={() => setOpenNavMenu(null)}>
+                                <ChildIcon className="h-4 w-4 text-[#616161]" />
+                                {child.label}
+                              </Link>
+                            )
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                }
 
                 return (
                   <Link

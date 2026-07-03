@@ -26,8 +26,14 @@ type AdminModulePageProps<Row> = {
   columns: Array<AdminColumn<Row>>
   rowActions?: (row: Row) => ReactNode
   getRowKey: (row: Row) => string
+  getRowClassName?: (row: Row) => string | undefined
   searchPlaceholder: string
+  searchValue?: string
+  onSearchChange?: (value: string) => void
+  showSearch?: boolean
+  showFilter?: boolean
   emptyMessage: string
+  tableFooter?: ReactNode
   children?: ReactNode
 }
 
@@ -46,8 +52,14 @@ export function AdminModulePage<Row>({
   columns,
   rowActions,
   getRowKey,
+  getRowClassName,
   searchPlaceholder,
+  searchValue,
+  onSearchChange,
+  showSearch = true,
+  showFilter = true,
   emptyMessage,
+  tableFooter,
   children,
 }: AdminModulePageProps<Row>) {
   return (
@@ -58,7 +70,7 @@ export function AdminModulePage<Row>({
             <h1 className="page-title">{title}</h1>
             <Badge tone="info">{badge}</Badge>
           </div>
-          <p className="page-description">{description}</p>
+          {description ? <p className="page-description">{description}</p> : null}
         </div>
         {primaryAction ? (
           <button className="polaris-button polaris-button-primary" type="button" onClick={onPrimaryAction}>
@@ -82,18 +94,27 @@ export function AdminModulePage<Row>({
 
       {children}
 
-      <section className="section-card">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <label className="control-surface flex min-w-0 items-center gap-2 px-3 text-sm lg:w-[26rem]">
-            <Search className="h-4 w-4 shrink-0 text-[#616161]" />
-            <input className="min-w-0 flex-1 border-0 bg-transparent py-2 outline-none" placeholder={searchPlaceholder} />
-          </label>
-          <button className="polaris-button polaris-button-secondary w-fit">
-            <Filter className="h-4 w-4" />
-            Filter
-          </button>
-        </div>
-      </section>
+      {showSearch ? (
+        <section className="section-card admin-search-card">
+          <div className="admin-search-toolbar">
+            <label className="admin-search-control">
+              <Search className="h-5 w-5 shrink-0 text-[#616161]" />
+              <input
+                className="admin-search-input"
+                placeholder={searchPlaceholder}
+                value={searchValue}
+                onChange={(event) => onSearchChange?.(event.target.value)}
+              />
+            </label>
+            {showFilter ? (
+              <button className="polaris-button polaris-button-secondary w-fit">
+                <Filter className="h-4 w-4" />
+                Filter
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       <section className="table-card">
         <div className="overflow-x-auto">
@@ -105,18 +126,18 @@ export function AdminModulePage<Row>({
                     {column.header}
                   </th>
                 ))}
-                {rowActions ? <th>Actions</th> : null}
+                {rowActions ? <th className="admin-actions-heading">Actions</th> : null}
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={getRowKey(row)}>
+                <tr key={getRowKey(row)} className={getRowClassName?.(row)}>
                   {columns.map((column) => (
                     <td key={column.header} className={column.className}>
                       {column.cell(row)}
                     </td>
                   ))}
-                  {rowActions ? <td>{rowActions(row)}</td> : null}
+                  {rowActions ? <td className="admin-actions-cell">{rowActions(row)}</td> : null}
                 </tr>
               ))}
               {rows.length === 0 ? (
@@ -129,6 +150,7 @@ export function AdminModulePage<Row>({
             </tbody>
           </table>
         </div>
+        {tableFooter ? <div className="table-card-footer">{tableFooter}</div> : null}
       </section>
     </div>
   )

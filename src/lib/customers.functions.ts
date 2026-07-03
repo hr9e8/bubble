@@ -13,7 +13,21 @@ const listCustomersInput = z
   })
   .optional()
 
-const exportCustomersInput = z.object({
+const customerDirectoryInput = z
+  .object({
+    query: z.string().optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    segment: z.enum(['all', 'best', 'atRisk']).default('all'),
+    minOrders: z.number().int().min(0).optional(),
+    maxOrders: z.number().int().min(0).optional(),
+    lastOrder: z.enum(['last30', 'last60', 'last90', 'older90', 'none']).optional(),
+    sellerUserId: z.string().optional(),
+    state: z.string().optional(),
+    country: z.string().optional(),
+  })
+  .optional()
+
+const exportCustomersInput = customerDirectoryInput.unwrap().omit({ limit: true }).extend({
   format: z.enum(['csv', 'xlsx']),
 })
 
@@ -39,7 +53,17 @@ const getServerDeps = createServerOnlyFn(async () => {
   return { ...db, ...authContext, ...salesScope }
 })
 
-async function loadCustomerRows(input?: { query?: string; limit?: number }) {
+async function loadCustomerRows(input?: {
+  query?: string
+  limit?: number
+  segment?: 'all' | 'best' | 'atRisk'
+  minOrders?: number
+  maxOrders?: number
+  lastOrder?: 'last30' | 'last60' | 'last90' | 'older90' | 'none'
+  sellerUserId?: string
+  state?: string
+  country?: string
+}) {
   const { getDatabase, getOrderScopeUserIds, requireCurrentUser } = await getServerDeps()
   const user = await requireCurrentUser({ permissions: ['orders:own', 'orders:all', 'orders:team'] })
   const scopedUserIds = await getOrderScopeUserIds(user)
@@ -84,7 +108,16 @@ async function loadCustomerRows(input?: { query?: string; limit?: number }) {
       sql<string>`coalesce(order_metrics.seller_names, customers.seller_user_id, '')`.as('seller_names'),
       'order_metrics.last_order_date',
     ])
-    .orderBy('customers.created_at', 'desc')
+
+  if (input?.segment === 'best') {
+    query = query.where(sql<boolean>`coalesce(order_metrics.lifetime_orders, 0) >= 3`)
+  }
+
+  if (input?.segment === 'atRisk') {
+    query = query
+      .where(sql<boolean>`coalesce(order_metrics.lifetime_orders, 0) > 0`)
+      .where(sql<boolean>`order_metrics.last_order_date < now() - interval '60 days'`)
+  }
 
   if (input?.query) {
     query = query.where((eb) =>
@@ -96,6 +129,50 @@ async function loadCustomerRows(input?: { query?: string; limit?: number }) {
     )
   }
 
+  if (input?.minOrders != null) {
+    query = query.where(sql<boolean>`coalesce(order_metrics.lifetime_orders, 0) >= ${input.minOrders}`)
+  }
+
+  if (input?.maxOrders != null) {
+    query = query.where(sql<boolean>`coalesce(order_metrics.lifetime_orders, 0) <= ${input.maxOrders}`)
+  }
+
+  if (input?.lastOrder === 'last30') {
+    query = query.where(sql<boolean>`order_metrics.last_order_date >= now() - interval '30 days'`)
+  } else if (input?.lastOrder === 'last60') {
+    query = query.where(sql<boolean>`order_metrics.last_order_date >= now() - interval '60 days'`)
+  } else if (input?.lastOrder === 'last90') {
+    query = query.where(sql<boolean>`order_metrics.last_order_date >= now() - interval '90 days'`)
+  } else if (input?.lastOrder === 'older90') {
+    query = query.where(sql<boolean>`order_metrics.last_order_date < now() - interval '90 days'`)
+  } else if (input?.lastOrder === 'none') {
+    query = query.where('order_metrics.customer_id', 'is', null)
+  }
+
+  const sellerUserId = input?.sellerUserId
+  if (sellerUserId) {
+    query = query.where((eb) =>
+      eb.or([
+        eb('customers.seller_user_id', '=', sellerUserId),
+        eb.exists(
+          eb
+            .selectFrom('orders as seller_orders')
+            .select('seller_orders.id')
+            .whereRef('seller_orders.customer_id', '=', 'customers.id')
+            .where('seller_orders.seller_user_id', '=', sellerUserId),
+        ),
+      ]),
+    )
+  }
+
+  if (input?.country) {
+    query = query.where('customers.country', 'ilike', input.country)
+  }
+
+  if (input?.state) {
+    query = query.where('customers.state', 'ilike', input.state)
+  }
+
   if (scopedUserIds != null) {
     query = query.where((eb) =>
       eb.or([
@@ -105,11 +182,105 @@ async function loadCustomerRows(input?: { query?: string; limit?: number }) {
     )
   }
 
+  if (input?.segment === 'best') {
+    query = query.orderBy(sql`coalesce(order_metrics.lifetime_value, 0)`, 'desc')
+  } else if (input?.segment === 'atRisk') {
+    query = query.orderBy('order_metrics.last_order_date', 'asc')
+  } else {
+    query = query.orderBy('customers.created_at', 'desc')
+  }
+
   if (input?.limit) {
     query = query.limit(input.limit)
   }
 
   return query.execute()
+}
+
+async function loadCustomerFilterOptions() {
+  const { getDatabase, getOrderScopeUserIds, requireCurrentUser } = await getServerDeps()
+  const user = await requireCurrentUser({ permissions: ['orders:own', 'orders:all', 'orders:team'] })
+  const scopedUserIds = await getOrderScopeUserIds(user)
+
+  let sellerQuery = getDatabase()
+    .selectFrom('orders')
+    .leftJoin('auth_users', 'auth_users.id', 'orders.seller_user_id')
+    .leftJoin('app_users', 'app_users.legacy_bubble_id', 'orders.seller_user_id')
+    .select(['orders.seller_user_id as value', sql<string>`coalesce(auth_users.name, app_users.name, orders.seller_user_id)`.as('label')])
+    .where('orders.seller_user_id', 'is not', null)
+    .groupBy(['orders.seller_user_id', 'auth_users.name', 'app_users.name'])
+    .orderBy('label')
+    .limit(200)
+
+  if (scopedUserIds != null) {
+    sellerQuery = sellerQuery.where('orders.seller_user_id', 'in', scopedUserIds)
+  }
+
+  let stateQuery = getDatabase()
+    .selectFrom('customers')
+    .select(['state as value'])
+    .where('state', 'is not', null)
+    .groupBy('state')
+    .orderBy('state')
+    .limit(200)
+
+  let countryQuery = getDatabase()
+    .selectFrom('customers')
+    .select(['country as value'])
+    .where('country', 'is not', null)
+    .groupBy('country')
+    .orderBy('country')
+    .limit(200)
+
+  if (scopedUserIds != null) {
+    stateQuery = stateQuery.where((eb) =>
+      eb.or([
+        eb('customers.seller_user_id', 'in', scopedUserIds),
+        eb.exists(
+          eb
+            .selectFrom('orders as scoped_orders')
+            .select('scoped_orders.id')
+            .whereRef('scoped_orders.customer_id', '=', 'customers.id')
+            .where('scoped_orders.seller_user_id', 'in', scopedUserIds),
+        ),
+      ]),
+    )
+
+    countryQuery = countryQuery.where((eb) =>
+      eb.or([
+        eb('customers.seller_user_id', 'in', scopedUserIds),
+        eb.exists(
+          eb
+            .selectFrom('orders as scoped_orders')
+            .select('scoped_orders.id')
+            .whereRef('scoped_orders.customer_id', '=', 'customers.id')
+            .where('scoped_orders.seller_user_id', 'in', scopedUserIds),
+        ),
+      ]),
+    )
+  }
+
+  const [sellers, states, countries] = await Promise.all([sellerQuery.execute(), stateQuery.execute(), countryQuery.execute()])
+
+  const stateOptions = new Map<string, string>()
+  for (const option of states) {
+    const value = option.value?.trim()
+    if (!value || !/[A-Za-z].*[A-Za-z]/.test(value)) continue
+    stateOptions.set(value.toLocaleLowerCase('en-MY'), value)
+  }
+
+  const countryOptions = new Map<string, string>()
+  for (const option of countries) {
+    const value = option.value?.trim()
+    if (!value || !/[A-Za-z].*[A-Za-z]/.test(value)) continue
+    countryOptions.set(value.toLocaleLowerCase('en-MY'), value)
+  }
+
+  return {
+    sellers: sellers.filter((option): option is { value: string; label: string } => Boolean(option.value && option.label)),
+    states: [...stateOptions.values()].map((value) => ({ value, label: titleCase(value) })),
+    countries: [...countryOptions.values()].map((value) => ({ value, label: titleCase(value) })),
+  }
 }
 
 function exportRow(row: Awaited<ReturnType<typeof loadCustomerRows>>[number]): CustomerExportRow {
@@ -129,10 +300,22 @@ export const listCustomers = createServerFn({ method: 'GET' })
   .validator(listCustomersInput)
   .handler(async ({ data }) => loadCustomerRows(data ?? { limit: 50 }))
 
+export const listCustomerDirectory = createServerFn({ method: 'GET' })
+  .validator(customerDirectoryInput)
+  .handler(async ({ data }) => {
+    const input = data ?? { limit: 50, segment: 'all' as const }
+    const [rows, filters] = await Promise.all([
+      loadCustomerRows(input),
+      loadCustomerFilterOptions(),
+    ])
+
+    return { rows, filters }
+  })
+
 export const exportCustomers = createServerFn({ method: 'POST' })
   .validator(exportCustomersInput)
   .handler(async ({ data }) => {
-    const rows = (await loadCustomerRows()).map(exportRow)
+    const rows = (await loadCustomerRows(data)).map(exportRow)
     const timestamp = new Date().toISOString().slice(0, 10)
 
     if (data.format === 'csv') {
@@ -165,6 +348,9 @@ export const getCustomerDetail = createServerFn({ method: 'GET' })
       .leftJoin('app_users', 'app_users.legacy_bubble_id', 'orders.seller_user_id')
       .select([
         'orders.customer_id',
+        sql<string>`coalesce(sum(orders.total_amount), 0)`.as('lifetime_value'),
+        sql<string>`count(orders.id)`.as('lifetime_orders'),
+        sql<Date | null>`max(orders.created_at)`.as('last_order_date'),
         sql<string>`coalesce(string_agg(distinct coalesce(auth_users.name, app_users.name, orders.seller_user_id), ', '), '')`.as('seller_names'),
       ])
       .where('orders.customer_id', '=', data.customerId)
@@ -181,6 +367,9 @@ export const getCustomerDetail = createServerFn({ method: 'GET' })
       .selectAll('customers')
       .select([
         'order_metrics.customer_id as scoped_order_customer_id',
+        sql<string>`coalesce(order_metrics.lifetime_value, 0)`.as('lifetime_value'),
+        sql<string>`coalesce(order_metrics.lifetime_orders, 0)`.as('lifetime_orders'),
+        'order_metrics.last_order_date',
         sql<string>`coalesce(order_metrics.seller_names, customers.seller_user_id, '')`.as('seller_names'),
       ])
       .where('customers.id', '=', data.customerId)
@@ -191,7 +380,63 @@ export const getCustomerDetail = createServerFn({ method: 'GET' })
       throw new ForbiddenError()
     }
 
-    return customer
+    const orders = await getDatabase()
+      .selectFrom('orders')
+      .leftJoin('auth_users', 'auth_users.id', 'orders.seller_user_id')
+      .leftJoin('app_users', 'app_users.legacy_bubble_id', 'orders.seller_user_id')
+      .select([
+        'orders.id',
+        'orders.order_number',
+        'orders.order_status',
+        'orders.payment_status',
+        'orders.payment_method',
+        'orders.currency',
+        'orders.total_amount',
+        'orders.shipping_total',
+        'orders.created_at',
+        'orders.platform_category',
+        'orders.platform_option',
+        'orders.order_website',
+        sql<string>`coalesce(auth_users.name, app_users.name, orders.seller_user_id, 'Unassigned')`.as('seller_name'),
+      ])
+      .where('orders.customer_id', '=', data.customerId)
+      .$if(scopedUserIds != null, (qb) => qb.where('orders.seller_user_id', 'in', scopedUserIds ?? []))
+      .orderBy('orders.created_at', 'desc')
+      .limit(100)
+      .execute()
+
+    const orderIds = orders.map((order) => order.id)
+    const items = orderIds.length
+      ? await getDatabase()
+        .selectFrom('order_items')
+        .leftJoin('products', 'products.id', 'order_items.product_id')
+        .select([
+          'order_items.order_id',
+          'order_items.quantity',
+          'order_items.order_price',
+          'order_items.order_line_total',
+          'products.name as product_name',
+          'products.sku_code as product_sku',
+        ])
+        .where('order_items.order_id', 'in', orderIds)
+        .orderBy('order_items.created_at', 'asc')
+        .execute()
+      : []
+
+    const itemsByOrder = new Map<string, typeof items>()
+    for (const item of items) {
+      const current = itemsByOrder.get(item.order_id) ?? []
+      current.push(item)
+      itemsByOrder.set(item.order_id, current)
+    }
+
+    return {
+      customer,
+      orders: orders.map((order) => ({
+        ...order,
+        items: itemsByOrder.get(order.id) ?? [],
+      })),
+    }
   })
 
 export const saveCustomer = createServerFn({ method: 'POST' })

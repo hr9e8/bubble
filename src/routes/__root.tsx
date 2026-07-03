@@ -1,4 +1,4 @@
-import { HeadContent, Scripts, createRootRouteWithContext, redirect } from '@tanstack/react-router'
+import { HeadContent, Link, Scripts, createRootRouteWithContext, redirect } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import { AppShell } from '../components/app-shell'
@@ -60,8 +60,25 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       },
     ],
   }),
+  notFoundComponent: RootNotFound,
   shellComponent: RootDocument,
 })
+
+function RootNotFound() {
+  return (
+    <main className="app-page">
+      <section className="section-card">
+        <h1 className="page-title">Page not found</h1>
+        <p className="page-description">The page you requested does not exist or is outside your current workspace.</p>
+        <div className="mt-5">
+          <Link to="/" className="polaris-button polaris-button-primary">
+            Back to dashboard
+          </Link>
+        </div>
+      </section>
+    </main>
+  )
+}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { currentUser } = Route.useRouteContext()

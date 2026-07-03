@@ -1,82 +1,10 @@
 import { Link, Outlet, createFileRoute, useRouterState } from '@tanstack/react-router'
-import { ArrowRight, Boxes, Package, PackagePlus, Plug, ReceiptText, Settings2, ShieldCheck, Truck, Upload, Users } from 'lucide-react'
+import { ArrowRight, Boxes, Truck, Users } from 'lucide-react'
+import { navigationItems } from '../lib/domain'
 
 export const Route = createFileRoute('/admin')({ component: AdminPage })
 
-const adminModules = [
-  {
-    title: 'Users',
-    detail: 'App profiles, role assignment, platform links, sales leaders, and warehouse relations.',
-    href: '/admin/users',
-    icon: Users,
-  },
-  {
-    title: 'Roles and permissions',
-    detail: 'Define role permission grants and audit-sensitive administrative access.',
-    href: '/admin/roles',
-    icon: ShieldCheck,
-  },
-  {
-    title: 'Products',
-    detail: 'Product parity fields, categories, images, supplier data, visibility, and reorder levels.',
-    href: '/admin/products',
-    icon: Package,
-  },
-  {
-    title: 'Bundles',
-    detail: 'Build bundle products from child product line items.',
-    href: '/admin/bundles',
-    icon: PackagePlus,
-  },
-  {
-    title: 'Pricing',
-    detail: 'Retail, distributor, bundle, price-list, and product-credit controls.',
-    href: '/admin/pricing',
-    icon: ReceiptText,
-  },
-  {
-    title: 'Shipping',
-    detail: 'Countries, states, zones, COD rates, couriers, and shipping matrices.',
-    href: '/admin/shipping',
-    icon: Truck,
-  },
-  {
-    title: 'Couriers',
-    detail: 'Courier directory, account IDs, tracking URLs, and AWB references.',
-    href: '/admin/couriers',
-    icon: Truck,
-  },
-  {
-    title: 'Platforms',
-    detail: 'Sales platforms, warehouse platforms, website owners, and order prefixes.',
-    href: '/admin/platforms',
-    icon: Settings2,
-  },
-  {
-    title: 'Stock setup',
-    detail: 'Lots, balances, warehouses, movement ledger, and controlled assignment.',
-    href: '/admin/stocks',
-    icon: Boxes,
-  },
-  {
-    title: 'Warehouses',
-    detail: 'Warehouse platforms, user relations, stock locations, and fulfillment ownership.',
-    href: '/admin/warehouses',
-    icon: Truck,
-  },
-  {
-    title: 'WooCommerce',
-    detail: 'Connect stores, test reachability, queue imports, and receive webhooks.',
-    href: '/admin/woocommerce',
-    icon: Plug,
-  },
-  {
-    title: 'Migration',
-    detail: 'Run Bubble CSV profiling, raw staging, transforms, and reconciliation checks.',
-    href: '/admin/migration',
-    icon: Upload,
-  },
-] as const
+const adminModules = navigationItems.find((item) => item.href === '/admin')?.children ?? []
 
 function AdminPage() {
   const activeRouteId = useRouterState({ select: (state) => state.matches.at(-1)?.routeId })
@@ -103,7 +31,7 @@ function AdminPage() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <Icon className="mb-4 h-5 w-5 text-[#008060]" />
-                  <h2 className="section-heading">{module.title}</h2>
+                  <h2 className="section-heading">{module.label}</h2>
                   <p className="section-muted mt-1">{module.detail}</p>
                 </div>
               </div>
